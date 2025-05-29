@@ -1,5 +1,7 @@
-input_folder = './video_data/';
-output_file = 'result.bin';
+addpath('./functions');
+
+input_folder = '../video_data/';
+output_file = '../outputs/result.bin';
 gop_size = 15;
 
 frame_files = dir(fullfile(input_folder, '*.jpg'));

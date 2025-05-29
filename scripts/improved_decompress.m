@@ -1,8 +1,10 @@
-input_file = 'result_improved.bin';
-output_folder = './decompressed_improved/';
+addpath('./functions');
+
+input_file = '../outputs/result_improved.bin';
+output_folder = '../outputs/decompressed_improved/';
 mkdir(output_folder);
 
-frame_files = dir('./video_data/*.jpg');
+frame_files = dir('../video_data/*.jpg');
 num_frames = length(frame_files);
 fid = fopen(input_file, 'r');
 
