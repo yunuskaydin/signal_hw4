@@ -1,116 +1,135 @@
-% eval_gop_psnr.m
+% plot_psnr_gops_debug.m
+% ——————————————————————————————————————————————————————————
+% Decompress GOP=1,15,30 bitstreams, clamp/zero‐floor PSNR, dump debug images, plot PSNR
 
-addpath('./functions');
+%% 0) PARAMETERS
+input_folder = '../video_data';               % original .jpg frames
+output_dir   = '../outputs';    % where your result_gopXX.bin live
+frame_files  = dir(fullfile(input_folder,'*.jpg'));
+num_frames   = numel(frame_files);
 
-%% Parameters
-input_folder   = '../video_data/';
-frame_files    = dir(fullfile(input_folder,'*.jpg'));
-num_frames     = numel(frame_files);
-gopSizes       = [1, 15, 30];
-blockH = 8;  blockW = 8;     % your macroblock dimensions
-MAX_I  = 255;               % 8-bit pixel max
+gopSizes = [1, 15, 30];
+numGops   = numel(gopSizes);
+psnrVals  = zeros(numGops, num_frames);
 
-%% 1) Load originals
-orig = cell(1,num_frames);
+% Frame & macroblock dims
+H      = 360;  W      = 480;  C = 3;
+blockH = 8;    blockW = 8;
+MB_rows = H/blockH;
+MB_cols = W/blockW;
+MAX_I   = 255;  
+
+% Make a debug folder
+if ~exist('debug_frames','dir')
+    mkdir('debug_frames');
+end
+
+%% 1) LOAD ORIGINALS INTO 4‐D ARRAY
+orig = zeros(H, W, C, num_frames);
 for k = 1:num_frames
-    orig{k} = double(imread(fullfile(input_folder, frame_files(k).name)));
+    orig(:,:,:,k) = double(imread(fullfile(input_folder, frame_files(k).name)));
 end
 
-%% 2) Preallocate PSNR storage
-psnrVals = zeros(numel(gopSizes), num_frames);
-
-%% 3) Loop over GOP sizes
-for gi = 1:numel(gopSizes)
+%% 2) DECOMPRESS & COMPUTE PSNR
+for gi = 1:numGops
     gop = gopSizes(gi);
-    binName = sprintf('temp_gop%02d.bin', gop);
+    fprintf('--- Processing GOP = %02d ---\n', gop);
     
-    %--- Compress with this GOP ---
-    fid = fopen(binName,'w');
-    prev_mb = [];
-    for k = 1:num_frames
-        frame    = orig{k};
-        mb_cells = frame_to_mb(frame);           % your existing helper
-        is_iframe = mod(k-1, gop)==0;
-        fwrite(fid, is_iframe, 'uint8');
-        
-        for i = 1:size(mb_cells,1)
-          for j = 1:size(mb_cells,2)
-            block = mb_cells{i,j};
-            if is_iframe
-              [rle,len] = compress_block(block);
-            else
-              residual = block - prev_mb{i,j};
-              [rle,len] = compress_block(residual);
-            end
-            for ch = 1:3
-              fwrite(fid, len(ch),     'int16');
-              fwrite(fid, rle{ch},     'int16');
-            end
-          end
-        end
-        prev_mb = mb_cells;
+    % open corresponding bitstream
+    fname = sprintf('result_gop%02d.bin', gop);
+    fid   = fopen(fullfile(output_dir, fname), 'r');
+    if fid < 0
+        error('Could not open %s', fname);
     end
-    fclose(fid);
     
-    %--- Decompress and compute PSNR per frame ---
-    fid = fopen(binName,'r');
-    prev_mb = [];
+    % numeric buffer for previous‐frame MBs: [h,w,ch,row,col]
+    prev_mb = zeros(blockH, blockW, C, MB_rows, MB_cols);
+    
     for k = 1:num_frames
-        % Read I-frame flag
-        is_iframe = fread(fid,1,'uint8');
+        % read I/P flag
+        is_iframe = fread(fid, 1, 'uint8');
+        recFrame  = zeros(H, W, C);
         
-        % Prepare empty reconstruction
-        [H,W,~] = size(orig{k});
-        recFrame = zeros(H,W,3);
-        
-        % Decode each macroblock
-        for i = 1:H/blockH
-          for j = 1:W/blockW
-            % Temporary holder for this MB
-            recon_mb = zeros(blockH, blockW, 3);
-            for ch = 1:3
-              L = fread(fid,1,'int16');         % run-length count
-              data = fread(fid, 2*L, 'int16');  % [val1 run1 val2 run2 …]
-              % RLE → vector
-              v = [];
-              for p = 1:2:numel(data)
-                v = [v; repmat(data(p), data(p+1),1)]; 
-              end
-              % reshape & add back if P-frame
-              block = reshape(v, [blockH, blockW]);
-              if is_iframe
-                recon_mb(:,:,ch) = block;
-              else
-                recon_mb(:,:,ch) = block + prev_mb{i,j}(:,:,ch);
-              end
+        % decode every macroblock
+        for i = 1:MB_rows
+            for j = 1:MB_cols
+                recon_mb = zeros(blockH, blockW, C);
+                
+                for ch = 1:C
+                    % read run‐length count
+                    L = fread(fid, 1, 'int16');
+                    if L > 0
+                        data = fread(fid, 2*L, 'int16');
+                    else
+                        data = [];
+                    end
+                    
+                    % fast RLE → fixed‐length vector v
+                    N   = blockH * blockW;
+                    v   = zeros(N,1);
+                    pos = 1;
+                    for p = 1:2:numel(data)
+                        val = data(p);
+                        run = data(p+1);
+                        take = min(run, N-pos+1);
+                        if take>0
+                            v(pos:pos+take-1) = val; 
+                            pos = pos + take;
+                        end
+                        if pos > N
+                            break;
+                        end
+                    end
+                    
+                    block = reshape(v, blockH, blockW);
+                    
+                    % intra vs. inter
+                    if is_iframe
+                        recon_mb(:,:,ch) = block;
+                    else
+                        recon_mb(:,:,ch) = block + prev_mb(:,:,ch,i,j);
+                    end
+                end
+                
+                % write it back into the full frame
+                rows = (i-1)*blockH + (1:blockH);
+                cols = (j-1)*blockW + (1:blockW);
+                recFrame(rows,cols,:) = recon_mb;
+                
+                % save for next frame’s prediction
+                prev_mb(:,:,:,i,j) = recon_mb;
             end
-            % place into recFrame
-            row = (i-1)*blockH + (1:blockH);
-            col = (j-1)*blockW + (1:blockW);
-            recFrame(row,col,:) = recon_mb;
-          end
         end
         
-        % store for next P-frame
-        prev_mb = mat2cell(recFrame, repmat(blockH,H/blockH,1), repmat(blockW,W/blockW,1), [1 1 1]);
+        % 2a) clamp pixel range
+        recFrame = min(max(recFrame, 0), 255);
         
-        % Compute MSE & PSNR
-        err = (orig{k} - recFrame).^2;
-        mse = mean(err(:));
-        psnrVals(gi,k) = 10*log10( MAX_I^2 / mse );
+        % 2b) compute & floor PSNR
+        err  = (orig(:,:,:,k) - recFrame).^2;
+        mse  = mean(err(:));
+        psnr = 10*log10( MAX_I^2 / mse );
+        psnrVals(gi,k) = max(psnr, 0);
+        
+        % 2c) dump first 3 frames for visual debug
+        if k <= 3
+            dbgname = sprintf('debug_frames/gop%02d_frame%03d.png', gop, k);
+            imwrite(uint8(recFrame), dbgname);
+        end
     end
+    
     fclose(fid);
 end
 
-%% 4) Plot all three PSNR curves
+%% 3) PLOT PSNR CURVES
 figure; hold on;
 cols = {'r','g','b'};
-for gi = 1:numel(gopSizes)
-  plot(1:num_frames, psnrVals(gi,:), '-o', 'Color', cols{gi}, ...
-       'DisplayName', sprintf('GOP = %d', gopSizes(gi)));
+for gi = 1:numGops
+    plot(1:num_frames, psnrVals(gi,:), '-o', ...
+         'Color', cols{gi}, ...
+         'DisplayName', sprintf('GOP = %d', gopSizes(gi)));
 end
-xlabel('Frame index');
+xlabel('Frame Number');
 ylabel('PSNR (dB)');
-title('PSNR vs Frame Number for GOP = 1,15,30');
+title('PSNR vs Frame Number for GOP = 1, 15, 30 (clamped & debug)');
 legend('Location','best');
 grid on;

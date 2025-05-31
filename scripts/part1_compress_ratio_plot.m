@@ -12,7 +12,7 @@ compressed_bits = zeros(size(gops));
 
 for idx = 1:numel(gops)
     gop = gops(idx);
-    outname = sprintf('result_gop%02d.bin', gop);
+    outname = sprintf('../outputs/result_gop%02d.bin', gop);
     fid = fopen(outname, 'w');
     prev_mb = [];   % clear reference frame
 

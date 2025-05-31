@@ -1,8 +1,8 @@
 addpath('./functions');
 
-input_folder = '../video_data/';
-output_file = '../outputs/result.bin';
 gop_size = 15;
+input_folder = '../video_data/';
+output_file = sprintf('../outputs/result_gop%02d.bin', gop_size);
 
 frame_files = dir(fullfile(input_folder, '*.jpg'));
 num_frames = length(frame_files);
