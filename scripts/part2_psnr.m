@@ -1,139 +1,52 @@
-% eval_gop_psnr.m
-
+% improved_eval_psnr.m
 addpath('./functions');
 
-%% Parameters
-input_folder   = '../video_data/';
-frame_files    = dir(fullfile(input_folder,'*.jpg'));
-num_frames     = numel(frame_files);
-gopSizes       = [1, 15, 30];
-blockH = 8;  blockW = 8;     % your macroblock dimensions
-MAX_I  = 255;               % 8-bit pixel max
+input_folder = '../video_data/';
+output_folder = '../outputs/decompressed_improved/';
+frame_files = dir(fullfile(input_folder, '*.jpg'));
+num_frames = length(frame_files);
+gopSizes = [1, 15, 30];
+MAX_I = 255;
 
-%% 1) Load originals
-orig = cell(1,num_frames);
+% Load original frames
+orig = cell(1, num_frames);
 for k = 1:num_frames
     orig{k} = double(imread(fullfile(input_folder, frame_files(k).name)));
 end
 
-%% 2) Preallocate PSNR storage
 psnrVals = zeros(numel(gopSizes), num_frames);
 
-%% 3) Loop over GOP sizes
 for gi = 1:numel(gopSizes)
-    gop = gopSizes(gi);
-    binName = sprintf('temp_gop%02d.bin', gop);
+    gop_size = gopSizes(gi);   % Global değişken olarak tanımlı olsun diye
     
-    %--- Compress with this GOP ---
-    fid = fopen(binName,'w');
-    prev_mb = [];
-    for k = 1:num_frames
-        frame    = orig{k};
-        mb_cells = frame_to_mb(frame);           % your existing helper
-        is_iframe = mod(k-1, gop)==0;
-        fwrite(fid, is_iframe, 'uint8');
-        
-        for i = 1:size(mb_cells,1)
-          for j = 1:size(mb_cells,2)
-            block = mb_cells{i,j};
-            if is_iframe
-              [rle,len] = compress_block(block);
-            else
-              % Use motion estimation to find best matching block
-              [best_block, dy, dx] = motion_estimate(block, prev_mb, i, j);
-              residual = block - best_block;
-              [rle,len] = compress_block(residual);
-              % Write motion vectors
-              fwrite(fid, dy, 'int8');
-              fwrite(fid, dx, 'int8');
-            end
-            for ch = 1:3
-              fwrite(fid, len(ch),     'int16');
-              fwrite(fid, rle{ch},     'int16');
-            end
-          end
-        end
-        prev_mb = mb_cells;
-    end
-    fclose(fid);
+    % Step 1: Encode
+    improved_compress;
     
-    %--- Decompress and compute PSNR per frame ---
-    fid = fopen(binName,'r');
-    prev_mb = [];
-    for k = 1:num_frames
-        % Read I-frame flag
-        is_iframe = fread(fid,1,'uint8');
-        
-        % Prepare empty reconstruction
-        [H,W,~] = size(orig{k});
-        recFrame = zeros(H,W,3);
-        
-        % Decode each macroblock
-        for i = 1:H/blockH
-          for j = 1:W/blockW
-            % Temporary holder for this MB
-            recon_mb = zeros(blockH, blockW, 3);
-            for ch = 1:3
-              L = fread(fid,1,'int16');         % run-length count
-              data = fread(fid, 2*L, 'int16');  % [val1 run1 val2 run2 …]
-              % RLE → vector
-              v = [];
-              for p = 1:2:numel(data)
-                v = [v; repmat(data(p), data(p+1),1)]; 
-              end
-              % reshape & add back if P-frame
-              v = v(:);  % ensure column vector
-                if length(v) < 64
-                    v = [v; zeros(64 - length(v), 1)];
-                elseif length(v) > 64
-                    v = v(1:64);
-                end
-                block = reshape(v, [blockH, blockW]);
+    % Step 2: Decode
+    improved_decompress;
 
-              if is_iframe
-                recon_mb(:,:,ch) = block;
-              else
-                % Read motion vectors
-                dy = fread(fid,1,'int8');
-                dx = fread(fid,1,'int8');
-                % Get reference block using motion vectors
-                ref_i = i + dy;
-                ref_j = j + dx;
-                if ref_i >= 1 && ref_j >= 1 && ref_i <= H/blockH && ref_j <= W/blockW
-                    ref_block = prev_mb{ref_i,ref_j}(:,:,ch);
-                else
-                    ref_block = zeros(blockH, blockW);
-                end
-                recon_mb(:,:,ch) = block + ref_block;
-              end
-            end
-            % place into recFrame
-            row = (i-1)*blockH + (1:blockH);
-            col = (j-1)*blockW + (1:blockW);
-            recFrame(row,col,:) = recon_mb;
-          end
+    % Step 3: Load decompressed and compute PSNR
+    for k = 1:num_frames
+        recon_path = fullfile(output_folder, frame_files(k).name);
+        if ~isfile(recon_path)
+            warning('Missing frame: %s', recon_path);
+            continue;
         end
-        
-        % store for next P-frame
-        prev_mb = mat2cell(recFrame, repmat(blockH, H/blockH, 1), repmat(blockW, W/blockW, 1), 3);
-        
-        % Compute MSE & PSNR
-        err = (orig{k} - recFrame).^2;
-        mse = mean(err(:));
-        psnrVals(gi,k) = 10*log10( MAX_I^2 / mse );
+        recon = double(imread(recon_path));
+        mse = mean((orig{k}(:) - recon(:)).^2);
+        psnrVals(gi, k) = 10 * log10(MAX_I^2 / mse);
     end
-    fclose(fid);
 end
 
-%% 4) Plot all three PSNR curves
+% Plot results
 figure; hold on;
-cols = {'r','g','b'};
+colors = {'r','g','b'};
 for gi = 1:numel(gopSizes)
-  plot(1:num_frames, psnrVals(gi,:), '-o', 'Color', cols{gi}, ...
-       'DisplayName', sprintf('GOP = %d', gopSizes(gi)));
+    plot(1:num_frames, psnrVals(gi,:), '-o', 'Color', colors{gi}, ...
+        'DisplayName', sprintf('GOP = %d', gopSizes(gi)));
 end
-xlabel('Frame index');
+xlabel('Frame Index');
 ylabel('PSNR (dB)');
-title('PSNR vs Frame Number for GOP = 1,15,30 (With Motion Estimation)');
+title('PSNR vs Frame Number (Improved Algorithm)');
 legend('Location','best');
 grid on;
