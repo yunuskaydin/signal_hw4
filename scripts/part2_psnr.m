@@ -17,7 +17,7 @@ end
 psnrVals = zeros(numel(gopSizes), num_frames);
 
 for gi = 1:numel(gopSizes)
-    gop_size = gopSizes(gi);   % Global değişken olarak tanımlı olsun diye
+    gop_size = gopSizes(gi);   
     
     % Step 1: Encode
     improved_compress;
