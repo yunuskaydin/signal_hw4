@@ -39,8 +39,13 @@ for gi = 1:numel(gopSizes)
             if is_iframe
               [rle,len] = compress_block(block);
             else
-              residual = block - prev_mb{i,j};
+              % Use motion estimation to find best matching block
+              [best_block, dy, dx] = motion_estimate(block, prev_mb, i, j);
+              residual = block - best_block;
               [rle,len] = compress_block(residual);
+              % Write motion vectors
+              fwrite(fid, dy, 'int8');
+              fwrite(fid, dx, 'int8');
             end
             for ch = 1:3
               fwrite(fid, len(ch),     'int16');
@@ -77,11 +82,29 @@ for gi = 1:numel(gopSizes)
                 v = [v; repmat(data(p), data(p+1),1)]; 
               end
               % reshape & add back if P-frame
-              block = reshape(v, [blockH, blockW]);
+              v = v(:);  % ensure column vector
+                if length(v) < 64
+                    v = [v; zeros(64 - length(v), 1)];
+                elseif length(v) > 64
+                    v = v(1:64);
+                end
+                block = reshape(v, [blockH, blockW]);
+
               if is_iframe
                 recon_mb(:,:,ch) = block;
               else
-                recon_mb(:,:,ch) = block + prev_mb{i,j}(:,:,ch);
+                % Read motion vectors
+                dy = fread(fid,1,'int8');
+                dx = fread(fid,1,'int8');
+                % Get reference block using motion vectors
+                ref_i = i + dy;
+                ref_j = j + dx;
+                if ref_i >= 1 && ref_j >= 1 && ref_i <= H/blockH && ref_j <= W/blockW
+                    ref_block = prev_mb{ref_i,ref_j}(:,:,ch);
+                else
+                    ref_block = zeros(blockH, blockW);
+                end
+                recon_mb(:,:,ch) = block + ref_block;
               end
             end
             % place into recFrame
@@ -92,7 +115,7 @@ for gi = 1:numel(gopSizes)
         end
         
         % store for next P-frame
-        prev_mb = mat2cell(recFrame, repmat(blockH,H/blockH,1), repmat(blockW,W/blockW,1), [1 1 1]);
+        prev_mb = mat2cell(recFrame, repmat(blockH, H/blockH, 1), repmat(blockW, W/blockW, 1), 3);
         
         % Compute MSE & PSNR
         err = (orig{k} - recFrame).^2;
@@ -111,6 +134,6 @@ for gi = 1:numel(gopSizes)
 end
 xlabel('Frame index');
 ylabel('PSNR (dB)');
-title('PSNR vs Frame Number for GOP = 1,15,30');
+title('PSNR vs Frame Number for GOP = 1,15,30 (With Motion Estimation)');
 legend('Location','best');
 grid on;

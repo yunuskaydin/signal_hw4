@@ -77,7 +77,13 @@ for gi = 1:numel(gopSizes)
                 v = [v; repmat(data(p), data(p+1),1)]; 
               end
               % reshape & add back if P-frame
-              block = reshape(v, [blockH, blockW]);
+              v = v(:);  % ensure it's a column
+                if length(v) < 64
+                    v = [v; zeros(64 - length(v), 1)];  % pad with zeros
+                elseif length(v) > 64
+                    v = v(1:64);  % trim
+                end
+                block = reshape(v, [blockH, blockW]);
               if is_iframe
                 recon_mb(:,:,ch) = block;
               else
@@ -92,7 +98,7 @@ for gi = 1:numel(gopSizes)
         end
         
         % store for next P-frame
-        prev_mb = mat2cell(recFrame, repmat(blockH,H/blockH,1), repmat(blockW,W/blockW,1), [1 1 1]);
+        prev_mb = mat2cell(recFrame, repmat(blockH,H/blockH,1), repmat(blockW,W/blockW,1), 3);
         
         % Compute MSE & PSNR
         err = (orig{k} - recFrame).^2;

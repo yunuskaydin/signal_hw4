@@ -1,8 +1,17 @@
 addpath('./functions');
+if ~exist('../outputs', 'dir')
+    mkdir('../outputs');
+end
+
 
 input_folder = '../video_data/';
-output_file = '../outputs/result.bin';
-gop_size = 15;
+
+if ~exist('gop_size', 'var')
+    gop_size = 15;  % default if not passed in
+end
+
+output_file = sprintf('../outputs/result_gop%02d.bin', gop_size);  % dynamic filename
+
 
 frame_files = dir(fullfile(input_folder, '*.jpg'));
 num_frames = length(frame_files);

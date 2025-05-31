@@ -1,6 +1,9 @@
 addpath('./functions');
 
-input_file = '../outputs/result.bin';
+if ~exist('gop_size', 'var')
+    gop_size = 15;
+end
+input_file = sprintf('../outputs/result_gop%02d.bin', gop_size);
 output_folder = '../outputs/decompressed/';
 mkdir(output_folder);
 

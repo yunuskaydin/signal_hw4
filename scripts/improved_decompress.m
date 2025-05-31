@@ -1,6 +1,9 @@
 addpath('./functions');
+if ~exist('gop_size', 'var')
+    gop_size = 15;
+end
+input_file = sprintf('../outputs/result_improved_gop%02d.bin', gop_size);
 
-input_file = '../outputs/result_improved.bin';
 output_folder = '../outputs/decompressed_improved/';
 mkdir(output_folder);
 
@@ -16,29 +19,32 @@ for frame_idx = 1:num_frames
 
     for i = 1:45
         for j = 1:60
-            dy_dx = fread(fid, 2, 'int8');
-            dy = dy_dx(1);
-            dx = dy_dx(2);
-
+            % Read motion vectors
+            dy = fread(fid, 1, 'int8');
+            dx = fread(fid, 1, 'int8');
+            
+            % Read and decode the block
             block = zeros(8, 8, 3);
             for ch = 1:3
                 len = fread(fid, 1, 'int16');
                 rle = fread(fid, len, 'int16');
+                
+                % Decode RLE and reconstruct block
                 zz = run_length_decode(rle);
                 q = inverse_zigzag(zz, 8, 8);
                 dct_block = q .* QMatrix();
                 block(:,:,ch) = idct2(dct_block);
             end
-
+            
             if ~is_iframe
+                % Get reference block using motion vectors
                 ref_i = i + dy;
                 ref_j = j + dx;
                 if ref_i >= 1 && ref_j >= 1 && ref_i <= 45 && ref_j <= 60
-                    ref_block = prev_mb{ref_i, ref_j};
-                    block = block + ref_block;
+                    block = block + prev_mb{ref_i,ref_j};
                 end
             end
-
+            
             mb_cells{i,j} = block;
         end
     end
