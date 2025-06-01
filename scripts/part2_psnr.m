@@ -1,4 +1,4 @@
-% improved_eval_psnr.m
+% Added the path of functions
 addpath('./functions');
 
 input_folder = '../video_data/';
@@ -6,6 +6,7 @@ output_folder = '../outputs/decompressed_improved/';
 frame_files = dir(fullfile(input_folder, '*.jpg'));
 num_frames = length(frame_files);
 gopSizes = [1, 15, 30];
+% Maximum pixel value for 8-bit images
 MAX_I = 255;
 
 % Load original frames
@@ -14,18 +15,20 @@ for k = 1:num_frames
     orig{k} = double(imread(fullfile(input_folder, frame_files(k).name)));
 end
 
+% Preallocate PSNR values for each GOP size and frame
 psnrVals = zeros(numel(gopSizes), num_frames);
 
+% Loop over different GOP sizes
 for gi = 1:numel(gopSizes)
     gop_size = gopSizes(gi);   
     
-    % Step 1: Encode
+    % Encodes using improved algorithm with motion estimation
     improved_compress;
     
-    % Step 2: Decode
+    % Decodes the improved bitstream
     improved_decompress;
 
-    % Step 3: Load decompressed and compute PSNR
+    % Computes PSNR per frame
     for k = 1:num_frames
         recon_path = fullfile(output_folder, frame_files(k).name);
         if ~isfile(recon_path)

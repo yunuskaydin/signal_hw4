@@ -1,12 +1,17 @@
+% Added the functions path
 addpath('./functions');
+
+% Ensured that if the gop_size doesn't exist it's set to 15 as default.
 if ~exist('gop_size', 'var')
     gop_size = 15;
 end
-input_file = sprintf('../outputs/result_improved_gop%02d.bin', gop_size);
+% Gets the input from the path that has compressed binary input
+input_file = sprintf('../outputs/compressed_improved/result_improved_gop%02d.bin', gop_size);
 
 output_folder = '../outputs/decompressed_improved/';
 mkdir(output_folder);
 
+% Load frame file names in order to have consistent output naming
 frame_files = dir('../video_data/*.jpg');
 num_frames = length(frame_files);
 fid = fopen(input_file, 'r');
@@ -49,7 +54,9 @@ for frame_idx = 1:num_frames
         end
     end
 
+    % Store current macroblocks as reference
     prev_mb = mb_cells;
+    % Convert macroblocks back to image and save
     frame = uint8(mb_to_frame(mb_cells));
     imwrite(frame, fullfile(output_folder, frame_files(frame_idx).name));
 end
